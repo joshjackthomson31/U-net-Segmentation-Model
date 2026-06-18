@@ -1,0 +1,19 @@
+# HHO-U-Net for FloodNet Semantic Segmentation
+# Install with: pip3 install -r requirements.txt
+#
+# PyTorch: install separately FIRST (see note below)
+# All other packages install via the single pip3 command above.
+#
+# NOTE — PyTorch for Apple M4 (MPS):
+#   pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+#   (MPS support is built into the standard CPU wheel on macOS — no special build needed)
+
+torch>=2.2.0
+torchvision>=0.17.0
+
+# Image loading and processing
+Pillow>=10.0.0
+numpy>=1.26.0
+
+# Used by evaluate.py visualizations and any future plotting
+matplotlib>=3.8.0

@@ -40,7 +40,7 @@ import torch.nn as nn
 
 from src.config import (
     NUM_CLASSES, PROXY_EPOCHS, FULL_EPOCHS, SEED,
-    CHECKPOINT_DIR, METRICS_DIR, DEVICE,
+    CHECKPOINT_DIR, METRICS_DIR, DEVICE, BACKBONE,
 )
 from src.unet    import build_unet
 from src.dataset import get_dataloaders
@@ -304,8 +304,8 @@ def proxy_train(
     # CRITICAL: seed before EVERYTHING — model init, dataloader shuffle, dropout
     _seed_everything(SEED)
 
-    # Build model with this hawk's dropout
-    model = build_unet(dropout=hps["dropout"]).to(device)
+    # Build model with this hawk's dropout (uses BACKBONE from config)
+    model = build_unet(dropout=hps["dropout"], backbone=BACKBONE).to(device)
 
     # DataLoaders with this hawk's batch_size
     train_loader, val_loader, _ = get_dataloaders(batch_size=hps["batch_size"])
@@ -381,8 +381,8 @@ def full_train(
         print(f"  {k}: {v}")
     print()
 
-    # Build model
-    model = build_unet(dropout=hps["dropout"]).to(device)
+    # Build model (uses BACKBONE from config)
+    model = build_unet(dropout=hps["dropout"], backbone=BACKBONE).to(device)
 
     # DataLoaders
     train_loader, val_loader, _ = get_dataloaders(batch_size=hps["batch_size"])
@@ -395,21 +395,38 @@ def full_train(
         weight_decay=hps["weight_decay"],
     )
 
+    # Cosine annealing scheduler: smoothly decays LR from hps["lr"] → 1e-6.
+    # Prevents the LR from staying fixed and causing loss oscillation in later epochs.
+    # T_max = total epochs → one full cosine cycle over the entire training run.
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer,
+        T_max=FULL_EPOCHS,
+        eta_min=1e-6,
+    )
+
     # History tracking
     history = {
         "train_loss": [],
         "val_loss":   [],
         "val_miou":   [],
+        "lr":         [],
         "best_epoch": 0,
         "best_miou":  0.0,
         "hps":        hps,
+        "backbone":   BACKBONE,
     }
     best_miou   = 0.0
     best_epoch  = 0
 
     for epoch in range(FULL_EPOCHS):
+        current_lr = optimizer.param_groups[0]["lr"]
+        history["lr"].append(current_lr)
+
         # ── Train ──────────────────────────────────────────────
         train_loss = train_one_epoch(model, train_loader, optimizer, criterion, device)
+
+        # ── Step scheduler AFTER each epoch ────────────────────
+        scheduler.step()
 
         # ── Validate ───────────────────────────────────────────
         val_loss, val_miou = validate(model, val_loader, criterion, device)
@@ -421,6 +438,7 @@ def full_train(
 
         print(
             f"[Epoch {epoch+1:02d}/{FULL_EPOCHS}] "
+            f"lr={current_lr:.2e}  "
             f"train_loss={train_loss:.4f}  "
             f"val_loss={val_loss:.4f}  "
             f"val_mIoU={val_miou:.4f}"

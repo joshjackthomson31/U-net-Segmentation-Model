@@ -106,6 +106,16 @@ GOA_BEST_HP = {
 }
 
 # ─────────────────────────────────────────────
+# MODEL BACKBONE
+# ─────────────────────────────────────────────
+# 'scratch'  : original from-scratch U-Net (~7M params, base_filters=32)
+# 'resnet34' : pre-trained ResNet-34 encoder + U-Net decoder (~24M params, ImageNet weights)
+#
+# NOTE: 'resnet34' requires ImageNet normalization in dataset.py (already applied).
+# GOA_BEST_HP was tuned for the from-scratch model; HHO re-tuning recommended after switching.
+BACKBONE = 'resnet34'
+
+# ─────────────────────────────────────────────
 # DEVICE (Apple M4 Pro -> MPS; fallback to CPU)
 # ─────────────────────────────────────────────
 def get_device():

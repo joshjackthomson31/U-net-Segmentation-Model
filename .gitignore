@@ -1,0 +1,25 @@
+# IDE
+.idea/
+
+# macOS
+.DS_Store
+
+# Dataset images (large binary files — download separately)
+FloodNet-Supervised_v1.0/
+ColorMasks-FloodNetv1.0/
+
+# Virtual environment
+venv/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Results (generated — not source code)
+results/
+
+# Jupyter checkpoints
+.ipynb_checkpoints/

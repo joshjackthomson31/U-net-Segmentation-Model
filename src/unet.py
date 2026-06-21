@@ -25,6 +25,7 @@ NOTE: Output is raw logits (no softmax). CrossEntropyLoss in train.py
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torchvision.models as tvm
 
 from src.config import NUM_CLASSES
 
@@ -231,22 +232,186 @@ class UNet(nn.Module):
 
 
 # ─────────────────────────────────────────────
+# RESNET BACKBONE U-NET
+# ─────────────────────────────────────────────
+
+class ResNetDecoderBlock(nn.Module):
+    """
+    One decoder step for the ResNet-encoder U-Net.
+
+    Upsamples `x` to match `skip` spatial size (bilinear), concatenates
+    along channel dim, then applies DoubleConv to mix features.
+
+    Args:
+        in_ch   : channels coming from the previous decoder level
+        skip_ch : channels from the corresponding ResNet encoder skip
+        out_ch  : output channels after DoubleConv
+        dropout : dropout probability (0 = off)
+    """
+    def __init__(self, in_ch: int, skip_ch: int, out_ch: int, dropout: float = 0.0):
+        super().__init__()
+        self.conv = DoubleConv(in_ch + skip_ch, out_ch)
+        self.drop = nn.Dropout2d(p=dropout) if dropout > 0.0 else nn.Identity()
+
+    def forward(self, x: torch.Tensor, skip: torch.Tensor) -> torch.Tensor:
+        # Bilinear upsample to match skip's spatial dims (handles non-power-of-2 safely)
+        x = F.interpolate(x, size=skip.shape[2:], mode="bilinear", align_corners=False)
+        x = torch.cat([x, skip], dim=1)
+        x = self.conv(x)
+        x = self.drop(x)
+        return x
+
+
+class ResNetUNet(nn.Module):
+    """
+    U-Net with a pre-trained ResNet encoder (ImageNet weights).
+
+    Why pre-trained?
+      1,445 training images is far too few for a scratch encoder to learn
+      low-level edges, textures, and shapes from zero. ImageNet weights
+      provide a rich prior — the encoder already "knows" what grass, roads,
+      and rooftops look like in natural aerial imagery.
+
+    Architecture (ResNet-34 default):
+      Encoder (frozen or fine-tuned):
+        enc0 = conv1+bn1+relu  → (B, 64,  256, 256)  ← skip s0
+        pool = maxpool          → (B, 64,  128, 128)
+        enc1 = layer1           → (B, 64,  128, 128)  ← skip s1
+        enc2 = layer2           → (B, 128,  64,  64)  ← skip s2
+        enc3 = layer3           → (B, 256,  32,  32)  ← skip s3
+        enc4 = layer4           → (B, 512,  16,  16)  ← bottleneck
+
+      Decoder (randomly initialized, trained from scratch):
+        dec4: up(512) + cat(s3:256) → DoubleConv(768→256) → (B,256, 32, 32)
+        dec3: up(256) + cat(s2:128) → DoubleConv(384→128) → (B,128, 64, 64)
+        dec2: up(128) + cat(s1: 64) → DoubleConv(192→64)  → (B, 64,128,128)
+        dec1: up( 64) + cat(s0: 64) → DoubleConv(128→64)  → (B, 64,256,256)
+        up×2 → DoubleConv(64→32)                          → (B, 32,512,512)
+        head: Conv2d(32→10)                                → (B, 10,512,512)
+
+    Args:
+        num_classes : output classes (10 for FloodNet)
+        backbone    : 'resnet34' or 'resnet50'
+        dropout     : dropout probability in decoder (HHO tunes this)
+    """
+
+    # ResNet channel dimensions per backbone
+    _ENC_CH = {
+        "resnet34": [64, 64, 128, 256, 512],
+        "resnet50": [64, 256, 512, 1024, 2048],
+    }
+
+    def __init__(
+        self,
+        num_classes: int = NUM_CLASSES,
+        backbone:    str = "resnet34",
+        dropout:     float = 0.0,
+    ):
+        super().__init__()
+
+        if backbone not in self._ENC_CH:
+            raise ValueError(f"Unsupported backbone '{backbone}'. Choose from {list(self._ENC_CH)}")
+
+        ec = self._ENC_CH[backbone]   # encoder channel sizes at each stage
+
+        # ── Load pre-trained encoder ──────────────────────────────
+        if backbone == "resnet34":
+            resnet = tvm.resnet34(weights=tvm.ResNet34_Weights.IMAGENET1K_V1)
+        else:
+            resnet = tvm.resnet50(weights=tvm.ResNet50_Weights.IMAGENET1K_V1)
+
+        # Split ResNet into encoder stages (matching U-Net skip-connection points)
+        self.enc0  = nn.Sequential(resnet.conv1, resnet.bn1, resnet.relu)  # 512→256
+        self.pool  = resnet.maxpool                                          # 256→128
+        self.enc1  = resnet.layer1    # 128×128
+        self.enc2  = resnet.layer2    #  64×64
+        self.enc3  = resnet.layer3    #  32×32
+        self.enc4  = resnet.layer4    #  16×16  (bottleneck)
+
+        # ── Decoder ───────────────────────────────────────────────
+        # in_ch  = channels from previous decoder output
+        # skip_ch = channels from corresponding encoder stage
+        # out_ch  = channels after DoubleConv
+        self.dec4 = ResNetDecoderBlock(ec[4], ec[3], 256, dropout)   # 16→32
+        self.dec3 = ResNetDecoderBlock(256,   ec[2], 128, dropout)   # 32→64
+        self.dec2 = ResNetDecoderBlock(128,   ec[1],  64, dropout)   # 64→128
+        self.dec1 = ResNetDecoderBlock(64,    ec[0],  64, dropout)   # 128→256
+
+        # Final upsample: 256×256 → 512×512
+        self.final_conv = DoubleConv(64, 32)
+        self.head       = nn.Conv2d(32, num_classes, kernel_size=1)
+
+        # Initialize decoder + head weights (encoder keeps ImageNet weights)
+        self._init_decoder_weights()
+
+        n_params = sum(p.numel() for p in self.parameters())
+        print(f"[ResNetUNet] Parameters: {n_params:,}  (backbone={backbone}, dropout={dropout})")
+
+    def _init_decoder_weights(self):
+        """Kaiming init for all decoder and head layers (not the encoder)."""
+        decoder_parts = [self.dec4, self.dec3, self.dec2, self.dec1,
+                         self.final_conv, self.head]
+        for module in decoder_parts:
+            for m in module.modules():
+                if isinstance(m, (nn.Conv2d, nn.ConvTranspose2d)):
+                    nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
+                    if m.bias is not None:
+                        nn.init.zeros_(m.bias)
+                elif isinstance(m, nn.BatchNorm2d):
+                    nn.init.ones_(m.weight)
+                    nn.init.zeros_(m.bias)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Input:  (B, 3,  512, 512) — ImageNet-normalized RGB
+        Output: (B, 10, 512, 512) — raw logits per class per pixel
+        """
+        # ── Encoder ────────────────────────────────────────────
+        s0 = self.enc0(x)      # (B,  64, 256, 256)
+        x  = self.pool(s0)     # (B,  64, 128, 128)
+        s1 = self.enc1(x)      # (B,  64, 128, 128)
+        s2 = self.enc2(s1)     # (B, 128,  64,  64)
+        s3 = self.enc3(s2)     # (B, 256,  32,  32)
+        x  = self.enc4(s3)     # (B, 512,  16,  16)
+
+        # ── Decoder ────────────────────────────────────────────
+        x = self.dec4(x, s3)   # (B, 256,  32,  32)
+        x = self.dec3(x, s2)   # (B, 128,  64,  64)
+        x = self.dec2(x, s1)   # (B,  64, 128, 128)
+        x = self.dec1(x, s0)   # (B,  64, 256, 256)
+
+        # Final upsample 256→512, refine, classify
+        x = F.interpolate(x, scale_factor=2, mode="bilinear", align_corners=False)
+        x = self.final_conv(x) # (B,  32, 512, 512)
+        return self.head(x)    # (B,  10, 512, 512)
+
+
+# ─────────────────────────────────────────────
 # FACTORY — used by HHO and training scripts
 # ─────────────────────────────────────────────
 
-def build_unet(dropout: float = 0.0, base_filters: int = 32) -> UNet:
+def build_unet(
+    dropout:     float = 0.0,
+    base_filters: int  = 32,
+    backbone:    str   = "scratch",
+) -> nn.Module:
     """
-    Build a fresh U-Net with given hyperparameters.
-    Called by HHO for each candidate evaluation and for final training.
+    Build a U-Net with given hyperparameters and backbone choice.
 
     Args:
         dropout      : dropout probability in decoder (HHO tunes this)
-        base_filters : filter multiplier (32 → ~6M params matching paper)
+        base_filters : filter multiplier for scratch U-Net (ignored for resnet*)
+        backbone     : 'scratch' → original U-Net (~7M params)
+                       'resnet34' → pre-trained ResNet-34 encoder (~24M params)
+                       'resnet50' → pre-trained ResNet-50 encoder (~33M params)
 
     Returns:
-        UNet model (not yet moved to device)
+        nn.Module (not yet moved to device)
     """
-    return UNet(num_classes=NUM_CLASSES, base_filters=base_filters, dropout=dropout)
+    if backbone == "scratch":
+        return UNet(num_classes=NUM_CLASSES, base_filters=base_filters, dropout=dropout)
+    else:
+        return ResNetUNet(num_classes=NUM_CLASSES, backbone=backbone, dropout=dropout)
 
 
 # ─────────────────────────────────────────────

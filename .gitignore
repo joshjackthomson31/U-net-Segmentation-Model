@@ -18,8 +18,8 @@ __pycache__/
 *.pyd
 .Python
 
-# Results (generated — not source code)
-results/
+# Results — track metrics/visualizations, but NOT large binary checkpoints (.pth files)
+results/checkpoints/*.pth
 
 # Jupyter checkpoints
 .ipynb_checkpoints/

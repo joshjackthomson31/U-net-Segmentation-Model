@@ -140,7 +140,7 @@ def _save_results(best_hps: dict, best_score: float, history: list, cache: dict)
 # MAIN SEARCH FUNCTION
 # ─────────────────────────────────────────────
 
-def run_search(device=None) -> dict:
+def run_search(device=None, resume=False) -> dict:
     """
     Run the full HHO hyperparameter search.
 
@@ -177,17 +177,58 @@ def run_search(device=None) -> dict:
     # ── Step 2: Build eval function ───────────────────────────────────────────
     eval_fn = _make_eval_fn(class_weights, device)
 
-    # ── Step 3: Run HHO ───────────────────────────────────────────────────────
+    # ── Step 3: Run HHO with incremental checkpointing + optional resume ─────
     print("[Step 2] Starting HHO search...\n")
+
+    checkpoint_path = os.path.join(METRICS_DIR, "hho_checkpoint.json")
+    os.makedirs(METRICS_DIR, exist_ok=True)
+
+    def _checkpoint(state_dict):
+        """
+        Write FULL algorithm state to disk after every completed iteration.
+
+        state_dict contains: hawk positions, fitness, rabbit pos/score,
+        convergence counters, numpy RNG state, cache, history.
+
+        On resume, this exact dict is passed back to hho.run(resume_state=...)
+        to restore the search exactly where it left off.
+        """
+        # Add human-readable summary at top level for easy inspection
+        state_dict["_best_hps_readable"] = state_dict.get("rabbit_pos")
+        state_dict["_iterations_done"]   = state_dict.get("t_last", 0)
+        with open(checkpoint_path, "w") as f:
+            json.dump(state_dict, f, indent=2)
+
+    # ── Resume from checkpoint if requested ──────────────────────────────────
+    resume_state = None
+    if resume:
+        if os.path.exists(checkpoint_path):
+            print(f"  [Resume] Loading checkpoint: {checkpoint_path}")
+            with open(checkpoint_path, "r") as f:
+                resume_state = json.load(f)
+            t_done = resume_state.get("t_last", 0)
+            best   = resume_state.get("rabbit_score", 0.0)
+            cached = len(resume_state.get("cache", {}))
+            print(f"  [Resume] Iteration {t_done} completed, best mIoU={best:.4f}, "
+                  f"{cached} HP sets cached (no retraining needed).\n")
+        else:
+            print(f"  [Resume] No checkpoint found at {checkpoint_path} — starting fresh.\n")
+    else:
+        print(f"  Progress auto-saved after every iteration → {checkpoint_path}")
+        print(f"  If interrupted, restart with: python main.py search --resume\n")
+
     t_search_start = time.perf_counter()
 
     hho = HHO(eval_fn=eval_fn, seed=SEED)
-    best_hps, best_score, history = hho.run()
+    best_hps, best_score, history = hho.run(
+        checkpoint_fn=_checkpoint,
+        resume_state=resume_state,
+    )
 
     t_search_total = time.perf_counter() - t_search_start
     print(f"\n[HHO Search] Total search time: {t_search_total/3600:.2f} hours")
 
-    # ── Step 4: Save everything ───────────────────────────────────────────────
+    # ── Step 4: Save final results ────────────────────────────────────────────
     _save_results(best_hps, best_score, history, hho._cache)
 
     # ── Step 5: Summary ───────────────────────────────────────────────────────

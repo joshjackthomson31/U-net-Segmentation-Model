@@ -1,0 +1,46 @@
+[
+  {
+    "iteration": 0,
+    "best_miou": 0.264341926574707
+  },
+  {
+    "iteration": 1,
+    "best_miou": 0.277658973634243
+  },
+  {
+    "iteration": 2,
+    "best_miou": 0.29405999146401884
+  },
+  {
+    "iteration": 3,
+    "best_miou": 0.29405999146401884
+  },
+  {
+    "iteration": 4,
+    "best_miou": 0.29405999146401884
+  },
+  {
+    "iteration": 5,
+    "best_miou": 0.3047930091619492
+  },
+  {
+    "iteration": 6,
+    "best_miou": 0.3047930091619492
+  },
+  {
+    "iteration": 7,
+    "best_miou": 0.3047930091619492
+  },
+  {
+    "iteration": 8,
+    "best_miou": 0.3047930091619492
+  },
+  {
+    "iteration": 9,
+    "best_miou": 0.3047930091619492
+  },
+  {
+    "iteration": 10,
+    "best_miou": 0.3047930091619492
+  }
+]

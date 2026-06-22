@@ -167,9 +167,10 @@ with torch.no_grad():   # don't track gradients (faster, less memory)
 **Step by step:**
 ```python
 _seed_everything(SEED)        # must be first — ensures reproducibility for caching
-model = build_unet(dropout=hps["dropout"]).to(device)
-train_loader, val_loader, _ = get_dataloaders(batch_size=hps["batch_size"], include_test=False)
-criterion = nn.CrossEntropyLoss()  # standard, no class weights
+model = build_unet(dropout=hps["dropout"], backbone=BACKBONE).to(device)
+# BACKBONE from config.py: 'resnet34' loads pre-trained ImageNet weights
+train_loader, val_loader, _ = get_dataloaders(batch_size=hps["batch_size"])
+criterion = nn.CrossEntropyLoss(weight=class_weights.to(device))
 optimizer = torch.optim.Adam(model.parameters(), lr=hps["lr"], weight_decay=hps["weight_decay"])
 
 for epoch in range(PROXY_EPOCHS):    # 5 epochs only
@@ -177,9 +178,6 @@ for epoch in range(PROXY_EPOCHS):    # 5 epochs only
 
 _, miou = validate(model, val_loader, criterion, device)
 ```
-
-**Why `include_test=False`?**
-The test DataLoader is not needed here — proxy_train only uses train and val. Creating it would print an extra log line and waste ~1 second per evaluation. Since HHO calls this hundreds of times, it adds up.
 
 **After evaluation — free memory:**
 ```python
@@ -209,10 +207,24 @@ MPS keeps tensors in GPU memory even after `del`. Explicitly clearing the cache 
 
 **1. Build model and DataLoaders:**
 ```python
-model = build_unet(dropout=hps["dropout"]).to(device)
+model = build_unet(dropout=hps["dropout"], backbone=BACKBONE).to(device)
+# BACKBONE='resnet34': loads 24.5M param ResNet-34 U-Net with ImageNet encoder
 train_loader, val_loader, _ = get_dataloaders(batch_size=hps["batch_size"])
 criterion = nn.CrossEntropyLoss(weight=class_weights.to(device))
 optimizer = torch.optim.Adam(model.parameters(), lr=hps["lr"], weight_decay=hps["weight_decay"])
+scheduler = CosineAnnealingLR(optimizer, T_max=FULL_EPOCHS, eta_min=1e-6)
+```
+
+**What is the cosine scheduler?**
+The learning rate starts at `hps["lr"]` and smoothly decreases to `1e-6` following a cosine curve over 20 epochs. Without this, the fixed LR causes the loss to oscillate wildly in later epochs — the model keeps overshooting the optimal weights. The scheduler prevents this by taking progressively smaller update steps as training matures.
+
+```
+LR over 20 epochs:
+9.5e-4 ─────╮
+             ╰──────╮
+                     ╰────────╮
+                               ╰──── 1e-6
+epoch:  1         7          14       20
 ```
 
 **2. Training loop (20 epochs):**
@@ -220,8 +232,10 @@ optimizer = torch.optim.Adam(model.parameters(), lr=hps["lr"], weight_decay=hps[
 for epoch in range(FULL_EPOCHS):
     current_lr = optimizer.param_groups[0]["lr"]   # log current LR
     train_loss = train_one_epoch(model, train_loader, optimizer, criterion, device)
+    scheduler.step()                               # decay LR after each epoch
     val_loss, val_miou = validate(model, val_loader, criterion, device)
     history["train_loss"].append(train_loss)
+    history["lr"].append(current_lr)
     history["val_miou"].append(val_miou)
     print(f"[Epoch {epoch+1}] lr={current_lr:.2e}  train_loss={train_loss:.4f}  val_mIoU={val_miou:.4f}")
 ```
@@ -230,10 +244,14 @@ for epoch in range(FULL_EPOCHS):
 ```python
 if val_miou > best_miou:
     best_miou = val_miou
-    torch.save({"state_dict": model.state_dict(), "val_miou": val_miou, "hps": hps},
-               "results/checkpoints/best_model.pth")
+    torch.save({
+        "state_dict": model.state_dict(),
+        "val_miou":   val_miou,
+        "hps":        hps,
+        "backbone":   BACKBONE,    # ← saved so evaluate.py rebuilds the right architecture
+    }, "results/checkpoints/best_model.pth")
 ```
-Only saves when val mIoU improves — keeps the BEST model seen during all 20 epochs, not just the last one. The model at epoch 19 might actually be slightly worse than epoch 17.
+Only saves when val mIoU improves — keeps the BEST model seen during all 20 epochs, not just the last one. `backbone` is stored in the checkpoint so `evaluate.py` rebuilds the exact same architecture when loading for test evaluation.
 
 **4. Save final checkpoint and metrics:**
 ```python

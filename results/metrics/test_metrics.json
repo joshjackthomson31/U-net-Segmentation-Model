@@ -1,0 +1,42 @@
+{
+  "miou": 0.3283585020340979,
+  "mean_dice": 0.44075751341879366,
+  "mean_recall": 0.4145738141611218,
+  "pixel_accuracy": 0.768686022077288,
+  "iou_per_class": {
+    "Background": 0.0,
+    "Building Flooded": 0.24189309775829315,
+    "Building Non-Flooded": 0.4162777364253998,
+    "Road Flooded": 0.036900073289871216,
+    "Road Non-Flooded": 0.3903297185897827,
+    "Water": 0.49880170822143555,
+    "Tree": 0.6266124248504639,
+    "Vehicle": 0.013953709043562412,
+    "Pool": 0.31854599714279175,
+    "Grass": 0.7402705550193787
+  },
+  "dice_per_class": {
+    "Background": 0.0,
+    "Building Flooded": 0.389555424451828,
+    "Building Non-Flooded": 0.5878475904464722,
+    "Road Flooded": 0.07117382436990738,
+    "Road Non-Flooded": 0.5614923238754272,
+    "Water": 0.6656006574630737,
+    "Tree": 0.7704508304595947,
+    "Vehicle": 0.02752336487174034,
+    "Pool": 0.48317769169807434,
+    "Grass": 0.8507534265518188
+  },
+  "recall_per_class": {
+    "Background": 0.0,
+    "Building Flooded": 0.4237782061100006,
+    "Building Non-Flooded": 0.579652726650238,
+    "Road Flooded": 0.037522390484809875,
+    "Road Non-Flooded": 0.4283558428287506,
+    "Water": 0.5823689699172974,
+    "Tree": 0.8067001700401306,
+    "Vehicle": 0.014040561392903328,
+    "Pool": 0.360463947057724,
+    "Grass": 0.912855327129364
+  }
+}

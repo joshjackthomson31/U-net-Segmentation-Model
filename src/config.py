@@ -115,6 +115,15 @@ GOA_BEST_HP = {
 # GOA_BEST_HP was tuned for the from-scratch model; HHO re-tuning recommended after switching.
 BACKBONE = 'resnet34'
 
+# Path to a locally downloaded ResNet-34 weights file.
+# Set this to the .pth file path after downloading manually (see instructions below).
+# Download command (run on personal hotspot / home WiFi — Walmart network blocks pytorch.org):
+#   mkdir -p ~/.cache/torch/hub/checkpoints
+#   curl -L https://download.pytorch.org/models/resnet34-b627a593.pth \
+#        -o ~/.cache/torch/hub/checkpoints/resnet34-b627a593.pth
+# Once downloaded, leave RESNET_WEIGHTS_PATH = None — torch.hub caches it automatically.
+RESNET_WEIGHTS_PATH = None   # e.g. "/Users/you/.cache/torch/hub/checkpoints/resnet34-b627a593.pth"
+
 # ─────────────────────────────────────────────
 # DEVICE (Apple M4 Pro -> MPS; fallback to CPU)
 # ─────────────────────────────────────────────

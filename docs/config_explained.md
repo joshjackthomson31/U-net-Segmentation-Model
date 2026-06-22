@@ -127,7 +127,39 @@ These are the hyperparameters the paper's GOA algorithm found. Used to verify ou
 
 ---
 
-### 7. Device Detection
+### 7. Model Backbone
+
+```python
+BACKBONE = 'resnet34'
+```
+
+Controls which model architecture is built by `build_unet()` in `unet.py`.
+
+| Value | Model | Parameters | Notes |
+|---|---|---|---|
+| `'scratch'` | Original U-Net | ~7.8M | Trains from zero — needs a lot of data |
+| `'resnet34'` | ResNet-34 U-Net | ~24.5M | Pre-trained ImageNet encoder ← **current** |
+| `'resnet50'` | ResNet-50 U-Net | ~33M | Larger pre-trained encoder |
+
+Every file that builds a model (`train.py`, `evaluate.py`, `main.py`) imports this constant — change it here once to switch architectures everywhere.
+
+```python
+RESNET_WEIGHTS_PATH = None
+```
+
+By default (`None`), PyTorch downloads ResNet-34 weights from `download.pytorch.org` and caches them at `~/.cache/torch/hub/checkpoints/resnet34-b627a593.pth`. Once cached, no internet is needed.
+
+**Walmart corporate network blocks `download.pytorch.org`.** If you get a network error, download the file manually on a personal hotspot:
+```bash
+mkdir -p ~/.cache/torch/hub/checkpoints
+curl -L https://download.pytorch.org/models/resnet34-b627a593.pth \
+     -o ~/.cache/torch/hub/checkpoints/resnet34-b627a593.pth
+```
+After this, leave `RESNET_WEIGHTS_PATH = None` — PyTorch finds the cached file automatically.
+
+---
+
+### 8. Device Detection
 
 ```python
 def get_device():
@@ -145,7 +177,7 @@ On your M4 Mac, this returns `mps` (Metal Performance Shaders — Apple's GPU fr
 
 ---
 
-### 8. Reproducibility
+### 9. Reproducibility
 
 ```python
 SEED = 42
@@ -162,10 +194,10 @@ Random seed used everywhere. With the same seed, the model initializes the same 
 from src.config import TRAIN_IMG_DIR, IMAGE_SIZE, NUM_CLASSES
 
 # In train.py:
-from src.config import NUM_CLASSES, FULL_EPOCHS, SEED, CHECKPOINT_DIR
+from src.config import NUM_CLASSES, FULL_EPOCHS, SEED, CHECKPOINT_DIR, BACKBONE
 
 # In unet.py:
-from src.config import NUM_CLASSES
+from src.config import NUM_CLASSES, RESNET_WEIGHTS_PATH
 
 # In hho_search.py:
 from src.config import HHO_POPULATION, HHO_MAX_ITERATIONS, DEVICE

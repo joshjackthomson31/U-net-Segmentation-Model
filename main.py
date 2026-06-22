@@ -42,7 +42,7 @@ def cmd_sanity():
       - Device (MPS/CUDA/CPU) is detected correctly
     """
     import torch
-    from src.config import DEVICE, NUM_CLASSES
+    from src.config import DEVICE, NUM_CLASSES, BACKBONE
     from src.unet   import build_unet
 
     print("\n" + "=" * 50)
@@ -50,8 +50,9 @@ def cmd_sanity():
     print("=" * 50)
     print(f"Device      : {DEVICE}")
     print(f"Num classes : {NUM_CLASSES}")
+    print(f"Backbone    : {BACKBONE}")
 
-    model = build_unet(dropout=0.3, base_filters=32).to(DEVICE)
+    model = build_unet(dropout=0.3, backbone=BACKBONE).to(DEVICE)
 
     dummy = torch.randn(2, 3, 512, 512).to(DEVICE)
     out   = model(dummy)
@@ -66,9 +67,10 @@ def cmd_sanity():
 
 
 def cmd_search():
-    """Run HHO hyperparameter search (overnight)."""
+    """Run HHO hyperparameter search (overnight). Pass --resume to continue from checkpoint."""
     from experiments.hho_search import run_search
-    run_search()
+    resume = "--resume" in sys.argv
+    run_search(resume=resume)
 
 
 def cmd_train():
@@ -100,15 +102,17 @@ HHO-U-Net for FloodNet Semantic Segmentation
 =============================================
 
 Commands:
-  python main.py sanity       Quick check: model builds correctly (run this first)
-  python main.py search       Run HHO to find best hyperparameters (overnight)
-  python main.py train        Full training + test evaluation (run after search)
-  python main.py evaluate     Re-evaluate best_model.pth on test set
+  python main.py sanity          Quick check: model builds correctly (run this first)
+  python main.py search          Run HHO to find best hyperparameters (overnight)
+  python main.py search --resume Resume search from last saved checkpoint
+  python main.py train           Full training + test evaluation (run after search)
+  python main.py evaluate        Re-evaluate best_model.pth on test set
 
 Typical workflow:
-  1. python main.py sanity    <- confirm setup works
-  2. python main.py search    <- leave running overnight
-  3. python main.py train     <- next day, final training + results
+  1. python main.py sanity              <- confirm setup works
+  2. caffeinate -is python main.py search   <- run overnight (plugged in!)
+     (if interrupted: caffeinate -is python main.py search --resume)
+  3. python main.py train               <- final training + results
 """
 
 

@@ -211,7 +211,67 @@ class HHO:
 
     # ── Main algorithm ────────────────────────────────────────────────────
 
-    def run(self):
+    def _state_to_dict(self, X, fitness, rabbit_pos, rabbit_score,
+                       no_improve_count, prev_best, t_last, history):
+        """
+        Serialize full algorithm state to a JSON-safe dict.
+        Called by checkpoint_fn after every iteration.
+
+        Includes numpy random state so resume produces statistically identical
+        hawk movements to an uninterrupted run.
+        """
+        rng = np.random.get_state()
+        # rng = ("MT19937", array(624 uint32), pos, has_gauss, cached_gaussian)
+        return {
+            "X":               X.tolist(),
+            "fitness":         fitness.tolist(),
+            "rabbit_pos":      rabbit_pos.tolist(),
+            "rabbit_score":    rabbit_score,
+            "no_improve_count": no_improve_count,
+            "prev_best":       prev_best,
+            "t_last":          t_last,
+            "history":         history,
+            "cache":           {str(k): v for k, v in self._cache.items()},
+            "np_rng": {
+                "name":            rng[0],
+                "state":           rng[1].tolist(),
+                "pos":             int(rng[2]),
+                "has_gauss":       int(rng[3]),
+                "cached_gaussian": float(rng[4]),
+            },
+        }
+
+    def _state_from_dict(self, d):
+        """
+        Restore full algorithm state from a saved dict (inverse of _state_to_dict).
+        Called at the start of run() when resuming from checkpoint.
+        """
+        rng_d = d["np_rng"]
+        np.random.set_state((
+            rng_d["name"],
+            np.array(rng_d["state"], dtype=np.uint32),
+            rng_d["pos"],
+            rng_d["has_gauss"],
+            rng_d["cached_gaussian"],
+        ))
+        # Restore cache
+        self._cache = {}
+        for k_str, v in d["cache"].items():
+            # Cache keys are tuples — eval is safe here (stored by our own code)
+            self._cache[eval(k_str)] = v  # noqa: S307
+
+        return (
+            np.array(d["X"],          dtype=np.float64),
+            np.array(d["fitness"],    dtype=np.float64),
+            np.array(d["rabbit_pos"], dtype=np.float64),
+            float(d["rabbit_score"]),
+            int(d["no_improve_count"]),
+            float(d["prev_best"]),
+            int(d["t_last"]),
+            [(entry[0], entry[1]) for entry in d["history"]],
+        )
+
+    def run(self, checkpoint_fn=None, resume_state=None):
         """
         Execute HHO search and return the best hyperparameters found.
 
@@ -233,6 +293,16 @@ class HHO:
                 checking average-population improvement once hawks converge.
           5. Return best HPs, best score, iteration history
 
+        Args:
+            checkpoint_fn : optional callable(state_dict)
+                            Called after EVERY iteration (including initial population eval).
+                            state_dict = full serializable algorithm state (see _state_to_dict).
+                            Use to save progress — if search crashes, restart with resume_state.
+
+            resume_state  : optional dict returned by _state_to_dict (loaded from checkpoint).
+                            If provided, skips initialization and resumes from t_last+1.
+                            Cache, hawk positions, fitness, and numpy RNG are all restored.
+
         Returns:
             best_hps    (dict)  : {"lr", "batch_size", "dropout", "weight_decay"}
             best_score  (float) : mIoU of best HPs, range [0, 1]
@@ -247,24 +317,44 @@ class HHO:
               f"threshold={HHO_CONVERGENCE_THRESHOLD}")
         print(f"{'='*60}")
 
-        # ── 1. Initialize ──────────────────────────────────────────────────
-        X       = self._init_population()                               # (N, 4)
-        print(f"\n[HHO] Evaluating {N} initial hawks (proxy training)...")
-        fitness = np.array([self._evaluate(X[i]) for i in range(N)])   # (N,)
+        if resume_state is not None:
+            # ── RESUME: restore full state from checkpoint ─────────────────
+            (X, fitness, rabbit_pos, rabbit_score,
+             no_improve_count, prev_best, t_last, history) = self._state_from_dict(resume_state)
 
-        # ── 2. Rabbit = hawk with highest mIoU ────────────────────────────
-        best_idx     = int(np.argmax(fitness))
-        rabbit_pos   = X[best_idx].copy()
-        rabbit_score = float(fitness[best_idx])
+            t_start = t_last + 1
+            print(f"\n[HHO] RESUMING from iteration {t_last}  "
+                  f"(best mIoU so far: {rabbit_score:.4f})")
+            print(f"[HHO] Cache restored: {len(self._cache)} evaluated HP sets — "
+                  f"no re-training needed for these.\n")
 
-        print(f"[HHO] Initial best mIoU: {rabbit_score:.4f} -> {self._decode(rabbit_pos)}\n")
+        else:
+            # ── FRESH START: initialize population ─────────────────────────
+            X       = self._init_population()                               # (N, 4)
+            print(f"\n[HHO] Evaluating {N} initial hawks (proxy training)...")
+            fitness = np.array([self._evaluate(X[i]) for i in range(N)])   # (N,)
 
-        history          = [(0, rabbit_score)]
-        no_improve_count = 0
-        prev_best        = rabbit_score
+            # ── Rabbit = hawk with highest mIoU ───────────────────────────
+            best_idx     = int(np.argmax(fitness))
+            rabbit_pos   = X[best_idx].copy()
+            rabbit_score = float(fitness[best_idx])
 
-        # ── 3. Main iterations ─────────────────────────────────────────────
-        for t in range(1, T + 1):
+            print(f"[HHO] Initial best mIoU: {rabbit_score:.4f} -> {self._decode(rabbit_pos)}\n")
+
+            history          = [(0, rabbit_score)]
+            no_improve_count = 0
+            prev_best        = rabbit_score
+            t_start          = 1
+
+            # Save after initial population evaluation
+            if checkpoint_fn is not None:
+                checkpoint_fn(self._state_to_dict(
+                    X, fitness, rabbit_pos, rabbit_score,
+                    no_improve_count, prev_best, 0, history,
+                ))
+
+        # ── Main iterations ────────────────────────────────────────────────
+        for t in range(t_start, T + 1):
 
             # Escape energy (Eq. 3): magnitude decreases from ~2 to 0 as t -> T
             # High |E| = hawk has energy to explore; low |E| = hawk closes in
@@ -369,6 +459,13 @@ class HHO:
             else:
                 no_improve_count = 0
             prev_best = rabbit_score
+
+            # ── Incremental checkpoint after every iteration ───────────────
+            if checkpoint_fn is not None:
+                checkpoint_fn(self._state_to_dict(
+                    X, fitness, rabbit_pos, rabbit_score,
+                    no_improve_count, prev_best, t, history,
+                ))
 
             if no_improve_count >= HHO_CONVERGENCE_PATIENCE:
                 print(f"\n[HHO] Early stop: no improvement > {HHO_CONVERGENCE_THRESHOLD} "

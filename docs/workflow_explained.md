@@ -4,14 +4,17 @@
 
 ## The Big Picture
 
-This project implements **HHO-U-Net**: a hybrid deep learning system that automatically finds the best training settings for a U-Net segmentation model using the Harris Hawks Optimization algorithm.
+This project implements **HHO-ResNet-UNet**: a hybrid deep learning system that automatically finds the best training settings for a ResNet-34 U-Net segmentation model using the Harris Hawks Optimization algorithm.
 
 **Goal:** Label every pixel in a post-flood aerial photo with one of 10 classes (Building Flooded, Water, Road, etc.) as accurately as possible.
 
 **Strategy:**
-1. Instead of manually guessing hyperparameters (learning rate, batch size, etc.), let HHO search for the best ones automatically
-2. Train the final U-Net with those best settings
-3. Measure how well the model segments unseen test images
+1. Use a **pre-trained ResNet-34 encoder** (ImageNet, 1.2M images) to overcome the data scarcity of 1,445 training images — the encoder already "knows" what roads, buildings, water, and vegetation look like
+2. Instead of manually guessing hyperparameters (learning rate, batch size, etc.), let **HHO** search for the best ones automatically
+3. Train the final model for 20 epochs with cosine LR annealing
+4. Measure how well the model segments unseen test images
+
+**Why ResNet-34?** Our from-scratch U-Net peaked at ~41% mIoU. The paper reports 67.97%. The gap is explained by the encoder learning capacity: 1,445 images cannot train a good encoder from scratch. A pre-trained ResNet-34 encoder closes this gap by starting from rich ImageNet features.
 
 ---
 
@@ -35,7 +38,7 @@ U-net-Segmentation-Model/
 │
 ├── src/                        ← Core library — reusable building blocks
 │   ├── config.py               ← All settings: paths, constants, HHO parameters
-│   ├── unet.py                 ← U-Net model definition (the neural network)
+│   ├── unet.py                 ← Model definitions: UNet (scratch) + ResNetUNet (pre-trained)
 │   ├── dataset.py              ← Data loading, augmentation, class weights
 │   ├── train.py                ← Training loop, validation, proxy_train, full_train
 │   ├── evaluate.py             ← Test set evaluation, metrics, visualization
@@ -115,7 +118,8 @@ main.py
    │       eval_fn(hps)
    │         └── src/train.py: proxy_train(hps, class_weights, device)
    │               ├── _seed_everything(42)
-   │               ├── src/unet.py: build_unet(dropout=hps["dropout"])
+   │               ├── src/unet.py: build_unet(dropout=hps["dropout"], backbone=BACKBONE)
+│               │     (backbone='resnet34' → ResNetUNet with ImageNet weights)
    │               ├── src/dataset.py: get_dataloaders(batch_size, include_test=False)
    │               ├── 5 epochs: train_one_epoch() × 5
    │               ├── validate() → val_mIoU
@@ -175,8 +179,8 @@ main.py
    │
    ├── _seed_everything(42)
    │
-   ├── src/unet.py: build_unet(dropout=best_hps["dropout"])
-   │   └── Creates fresh U-Net (7.8M parameters, Kaiming initialized)
+   ├── src/unet.py: build_unet(dropout=best_hps["dropout"], backbone=BACKBONE)
+   │   └── Creates ResNetUNet (24.5M params, ImageNet encoder + randomly-init decoder)
    │
    ├── src/dataset.py: get_dataloaders(batch_size=best_hps["batch_size"])
    │   ├── FloodNetDataset train (1444 images, augment=True)
@@ -250,12 +254,13 @@ main.py
 Quick health check — no dataset needed:
 ```
 main.py → cmd_sanity()
-  ├── src/config.py: DEVICE, NUM_CLASSES
-  ├── src/unet.py: build_unet(dropout=0.3, base_filters=32)
+  ├── src/config.py: DEVICE, NUM_CLASSES, BACKBONE
+  ├── src/unet.py: build_unet(dropout=0.3, backbone=BACKBONE)
+  │     → ResNetUNet (24.5M params) with ImageNet weights from cache
   ├── torch.randn(2, 3, 512, 512) → model → output
   └── assert output.shape == (2, 10, 512, 512)
 ```
-Run this FIRST to confirm your Python environment is set up correctly. Takes ~10 seconds.
+Run this FIRST to confirm your Python environment is set up correctly. Also downloads/verifies ResNet-34 weights. Takes ~10 seconds.
 
 ### `python main.py evaluate`
 
@@ -344,7 +349,7 @@ main.py
 | Test images | 448 | FloodNet |
 | Image size | 512×512 | Paper Sec. IV |
 | Classes | 10 | FloodNet |
-| Model parameters | 7,763,338 | U-Net base_filters=32 |
+| Model parameters | 24,521,994 | ResNet-34 U-Net (pre-trained encoder) |
 | HHO hawks | 20 | Paper Sec. IV |
 | HHO max iterations | 50 | Paper Sec. IV |
 | Proxy epochs (HHO) | 5 | Standard practice |
@@ -352,7 +357,8 @@ main.py
 | Search time | ~29 hours | M4 MPS |
 | Training time | ~1 hour | M4 MPS |
 | Paper best mIoU (GOA) | 67.97% | Paper Table II |
-| Our best mIoU | 41.71% | Run 2 (HHO+clamped weights+scheduler) |
+| Our best mIoU (scratch) | 41.71% | Previous best (from-scratch encoder) |
+| Target mIoU (ResNet-34) | ~55–67% | ResNet-34 + HHO + cosine scheduler |
 
 ---
 

@@ -22,12 +22,13 @@ NOTE: Output is raw logits (no softmax). CrossEntropyLoss in train.py
       applies softmax internally — do NOT add softmax here.
 """
 
+import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.models as tvm
 
-from src.config import NUM_CLASSES
+from src.config import NUM_CLASSES, RESNET_WEIGHTS_PATH
 
 
 # ─────────────────────────────────────────────
@@ -315,10 +316,36 @@ class ResNetUNet(nn.Module):
         ec = self._ENC_CH[backbone]   # encoder channel sizes at each stage
 
         # ── Load pre-trained encoder ──────────────────────────────
-        if backbone == "resnet34":
-            resnet = tvm.resnet34(weights=tvm.ResNet34_Weights.IMAGENET1K_V1)
-        else:
-            resnet = tvm.resnet50(weights=tvm.ResNet50_Weights.IMAGENET1K_V1)
+        # RESNET_WEIGHTS_PATH (config.py): set to local .pth path if pytorch.org is blocked.
+        # If None, torch.hub downloads automatically (requires internet access).
+        local_path = RESNET_WEIGHTS_PATH
+        try:
+            if backbone == "resnet34":
+                resnet = tvm.resnet34(weights=tvm.ResNet34_Weights.IMAGENET1K_V1)
+            else:
+                resnet = tvm.resnet50(weights=tvm.ResNet50_Weights.IMAGENET1K_V1)
+        except Exception as download_err:
+            # Network blocked (e.g. Walmart corporate network).
+            # Try loading from local path if provided.
+            if local_path and os.path.exists(local_path):
+                print(f"[ResNetUNet] Network unavailable — loading weights from: {local_path}")
+                if backbone == "resnet34":
+                    resnet = tvm.resnet34(weights=None)
+                else:
+                    resnet = tvm.resnet50(weights=None)
+                state = torch.load(local_path, map_location="cpu")
+                resnet.load_state_dict(state)
+            else:
+                raise RuntimeError(
+                    f"\n\n{'!'*60}\n"
+                    f"Cannot download ResNet-34 weights (network blocked).\n\n"
+                    f"Fix: download on personal hotspot / home WiFi, then run:\n"
+                    f"  mkdir -p ~/.cache/torch/hub/checkpoints\n"
+                    f"  curl -L https://download.pytorch.org/models/resnet34-b627a593.pth \\\n"
+                    f"       -o ~/.cache/torch/hub/checkpoints/resnet34-b627a593.pth\n\n"
+                    f"Once downloaded, the file is cached — no re-download needed.\n"
+                    f"{'!'*60}\n"
+                ) from download_err
 
         # Split ResNet into encoder stages (matching U-Net skip-connection points)
         self.enc0  = nn.Sequential(resnet.conv1, resnet.bn1, resnet.relu)  # 512→256

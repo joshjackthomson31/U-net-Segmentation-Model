@@ -444,11 +444,14 @@ def run_evaluation(
     print(f"[Evaluate] Loading checkpoint: {checkpoint_path}")
     ckpt = torch.load(checkpoint_path, map_location=device)
 
-    hps = ckpt.get("hps", {})
+    hps     = ckpt.get("hps", {})
     dropout = hps.get("dropout", 0.0)
+    # Read backbone from checkpoint (saved by full_train); fall back to config default
+    from src.config import BACKBONE as CFG_BACKBONE
+    backbone = ckpt.get("backbone", CFG_BACKBONE)
 
-    # Build model with SAME dropout used during training
-    model = build_unet(dropout=dropout).to(device)
+    # Build model with SAME architecture used during training
+    model = build_unet(dropout=dropout, backbone=backbone).to(device)
     model.load_state_dict(ckpt["state_dict"])
     print(f"[Evaluate] Model loaded (epoch={ckpt.get('epoch', '?')}, "
           f"val_mIoU={ckpt.get('val_miou', '?'):.4f})")

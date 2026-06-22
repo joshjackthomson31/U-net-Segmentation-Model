@@ -454,6 +454,7 @@ def full_train(
                     "state_dict": model.state_dict(),
                     "val_miou":   val_miou,
                     "hps":        hps,
+                    "backbone":   BACKBONE,
                 },
                 os.path.join(CHECKPOINT_DIR, "best_model.pth"),
             )
@@ -466,6 +467,7 @@ def full_train(
             "state_dict": model.state_dict(),
             "val_miou":   history["val_miou"][-1],
             "hps":        hps,
+            "backbone":   BACKBONE,
         },
         os.path.join(CHECKPOINT_DIR, "final_model.pth"),
     )

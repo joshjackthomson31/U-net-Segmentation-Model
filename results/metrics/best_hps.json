@@ -1,10 +1,9 @@
 {
   "best_hps": {
-    "lr": 0.0009549925860214359,
-    "batch_size": 4,
-    "dropout": 0.3,
-    "weight_decay": 0.0007943282347242813
+    "lr": 0.0003060215629001352,
+    "batch_size": 8,
+    "dropout": 0.18894052623930072,
+    "weight_decay": 0.0005698595879374626
   },
-  "best_miou": 0.0,
-  "_note": "GOA_BEST_HP from paper Table I — verifying training code correctness"
+  "best_miou": 0.4161535143852234
 }

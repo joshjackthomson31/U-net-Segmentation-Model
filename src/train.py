@@ -37,13 +37,72 @@ import random
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from src.config import (
-    NUM_CLASSES, PROXY_EPOCHS, FULL_EPOCHS, SEED,
+    NUM_CLASSES, PROXY_EPOCHS, FULL_EPOCHS, WARMUP_EPOCHS, SEED,
     CHECKPOINT_DIR, METRICS_DIR, DEVICE, BACKBONE,
 )
 from src.unet    import build_unet
 from src.dataset import get_dataloaders
+
+
+# ─────────────────────────────────────────────
+# DICE LOSS  (used in full_train only)
+# ─────────────────────────────────────────────
+
+class DiceLoss(nn.Module):
+    """
+    Multi-class soft Dice loss.
+
+    Why Dice in addition to CrossEntropy?
+      CrossEntropy penalizes per-pixel misclassification uniformly.
+      It does NOT directly penalize over-segmentation: a model that predicts
+      class c for too many pixels still gets low CE if the confident pixels
+      are correct. Dice loss = 1 - (2*|P∩G| / (|P|+|G|)) directly penalizes
+      cases where prediction area >> ground-truth area (low precision).
+
+    Combined CE + Dice:
+      CE  → pushes per-pixel log-probabilities up for correct class
+      Dice → pushes precision up (less over-segmentation)
+      Together they close the recall-vs-precision gap.
+
+    Used only in full_train — proxy_train keeps plain CE for HHO cache consistency.
+    """
+    def __init__(self, num_classes: int = NUM_CLASSES, smooth: float = 1e-6):
+        super().__init__()
+        self.num_classes = num_classes
+        self.smooth      = smooth
+
+    def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        # logits:  (B, C, H, W) — raw model output
+        # targets: (B, H, W)    — integer class indices
+        probs      = torch.softmax(logits, dim=1)                    # (B, C, H, W)
+        targets_oh = F.one_hot(targets, self.num_classes)            # (B, H, W, C)
+        targets_oh = targets_oh.permute(0, 3, 1, 2).float()         # (B, C, H, W)
+
+        # Intersection and denominator summed over spatial dims (H, W)
+        intersection = (probs * targets_oh).sum(dim=(2, 3))          # (B, C)
+        denom        = probs.sum(dim=(2, 3)) + targets_oh.sum(dim=(2, 3))  # (B, C)
+
+        dice_per_class = (2.0 * intersection + self.smooth) / (denom + self.smooth)
+        return 1.0 - dice_per_class.mean()
+
+
+class CombinedLoss(nn.Module):
+    """
+    CrossEntropy + Dice loss with equal weighting (alpha=0.5 each).
+
+    Used in full_train() only. proxy_train() keeps plain CrossEntropyLoss
+    so HHO cache keys remain valid (proxy scores stay comparable across runs).
+    """
+    def __init__(self, class_weights: torch.Tensor, num_classes: int = NUM_CLASSES):
+        super().__init__()
+        self.ce   = nn.CrossEntropyLoss(weight=class_weights)
+        self.dice = DiceLoss(num_classes=num_classes)
+
+    def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        return self.ce(logits, targets) + self.dice(logits, targets)
 
 
 # ─────────────────────────────────────────────
@@ -387,21 +446,42 @@ def full_train(
     # DataLoaders
     train_loader, val_loader, _ = get_dataloaders(batch_size=hps["batch_size"])
 
-    # Loss and optimizer
-    criterion = nn.CrossEntropyLoss(weight=class_weights.to(device))
+    # Loss and optimizer — CombinedLoss (CE + Dice) reduces over-segmentation
+    criterion = CombinedLoss(class_weights.to(device)).to(device)
     optimizer = torch.optim.Adam(
         model.parameters(),
         lr=hps["lr"],
         weight_decay=hps["weight_decay"],
     )
 
-    # Cosine annealing scheduler: smoothly decays LR from hps["lr"] → 1e-6.
-    # Prevents the LR from staying fixed and causing loss oscillation in later epochs.
-    # T_max = total epochs → one full cosine cycle over the entire training run.
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+    # LR schedule: linear warmup for WARMUP_EPOCHS, then cosine decay.
+    #
+    # Why warmup?
+    #   The ResNet-34 encoder has good ImageNet weights; the U-Net decoder starts
+    #   random. At full LR on epoch 1, random decoder gradients destabilize the
+    #   encoder weights before they've had a chance to adapt. This causes the
+    #   val_loss spikes seen at epochs 8-11 in every training run (the optimizer
+    #   escapes to a bad region and must recover). Warmup holds LR low while the
+    #   decoder stabilizes, then ramps up for efficient convergence.
+    #
+    # LinearLR: LR goes from (start_factor × base_lr) → base_lr over WARMUP_EPOCHS
+    # CosineAnnealingLR: LR decays from base_lr → eta_min over remaining epochs
+    # SequentialLR: chains both schedulers at the milestone (epoch = WARMUP_EPOCHS)
+    warmup = torch.optim.lr_scheduler.LinearLR(
         optimizer,
-        T_max=FULL_EPOCHS,
+        start_factor=0.01,                        # start at 1% of hps["lr"]
+        end_factor=1.0,                           # end at 100% of hps["lr"]
+        total_iters=WARMUP_EPOCHS,
+    )
+    cosine = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer,
+        T_max=FULL_EPOCHS - WARMUP_EPOCHS,        # cosine cycle over remaining epochs
         eta_min=1e-6,
+    )
+    scheduler = torch.optim.lr_scheduler.SequentialLR(
+        optimizer,
+        schedulers=[warmup, cosine],
+        milestones=[WARMUP_EPOCHS],
     )
 
     # History tracking

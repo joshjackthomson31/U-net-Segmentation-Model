@@ -152,7 +152,7 @@ class FloodNetDataset(Dataset):
 
     def _augment(self, image, mask):
         """
-        Apply identical random transforms to both image AND mask.
+        Apply identical random geometric transforms to both image AND mask.
 
         CRITICAL: Both image and mask must receive the exact same transform.
         If we flip the image left-right, the mask must flip left-right too.
@@ -162,6 +162,11 @@ class FloodNetDataset(Dataset):
           - Horizontal flip (50% chance): mirrors image left <-> right
           - Vertical flip   (50% chance): mirrors image top <-> bottom
           - 90/180/270 rotation (50% chance): rotates scene
+
+        NOTE: ColorJitter and scale+crop were tested and both hurt mIoU on
+        FloodNet because the dataset's train/val/test share consistent color
+        and scale characteristics (same drone campaign). Color/scale invariance
+        is noise, not signal, for this dataset.
         """
         if random.random() > 0.5:
             image = TF.hflip(image)

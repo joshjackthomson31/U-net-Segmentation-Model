@@ -80,9 +80,12 @@ def cmd_train():
 
 
 def cmd_evaluate():
-    """Re-evaluate best_model.pth on the test set."""
+    """Re-evaluate best_model.pth on the test set. Pass --tta to use test-time augmentation."""
     from src.evaluate import run_evaluation
-    metrics = run_evaluation(visualize=False)
+    use_tta = "--tta" in sys.argv
+    if use_tta:
+        print("[main] TTA enabled: averaging predictions over original + H-flip + V-flip")
+    metrics = run_evaluation(visualize=False, use_tta=use_tta)
     print(f"\nTest mIoU: {metrics['miou']:.4f}")
 
 
@@ -107,6 +110,7 @@ Commands:
   python main.py search --resume Resume search from last saved checkpoint
   python main.py train           Full training + test evaluation (run after search)
   python main.py evaluate        Re-evaluate best_model.pth on test set
+  python main.py evaluate --tta  Re-evaluate with test-time augmentation (H+V flip avg)
 
 Typical workflow:
   1. python main.py sanity              <- confirm setup works

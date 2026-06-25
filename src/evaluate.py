@@ -185,6 +185,55 @@ def _compute_metrics(cm: torch.Tensor, num_classes: int) -> dict:
 
 
 # ─────────────────────────────────────────────
+# TEST-TIME AUGMENTATION (TTA)
+# ─────────────────────────────────────────────
+
+def _tta_predict(model: nn.Module, images: torch.Tensor) -> torch.Tensor:
+    """
+    Average softmax probabilities over 3 views: original, H-flip, V-flip.
+
+    Why these three?
+      FloodNet images are aerial/drone shots with no canonical orientation.
+      A flooded building looks identical whether the image is flipped left-right
+      or top-bottom. Averaging predictions over flipped versions cancels out
+      random errors that are flip-asymmetric (e.g., the model predicts "Road"
+      on the right side of an ambiguous edge but "Water" on the left side —
+      averaging with the flipped prediction will vote against the wrong class).
+
+    How it works:
+      1. Predict on original → probs_orig
+      2. Flip image horizontally → predict → flip probs back → probs_hf
+      3. Flip image vertically   → predict → flip probs back → probs_vf
+      4. avg = (probs_orig + probs_hf + probs_vf) / 3
+      5. argmax(avg) → final prediction
+
+    The flip-back step is critical: probs must be spatially aligned before averaging.
+    Without flipping back, pixel (i, j) in probs_orig would be averaged with pixel
+    (i, W-1-j) in probs_hf, which are completely different locations.
+
+    Args:
+        model  : U-Net in eval mode — caller must be inside torch.no_grad()
+        images : (B, 3, H, W) normalized input batch, already on device
+
+    Returns:
+        preds : (B, H, W) argmax class predictions (int64, on same device as images)
+    """
+    # Original
+    probs = torch.softmax(model(images), dim=1)                         # (B, C, H, W)
+
+    # Horizontal flip (left-right): flip dim=3 (width)
+    imgs_hf  = torch.flip(images, dims=[3])
+    probs_hf = torch.flip(torch.softmax(model(imgs_hf), dim=1), dims=[3])
+
+    # Vertical flip (top-bottom): flip dim=2 (height)
+    imgs_vf  = torch.flip(images, dims=[2])
+    probs_vf = torch.flip(torch.softmax(model(imgs_vf), dim=1), dims=[2])
+
+    avg = (probs + probs_hf + probs_vf) / 3.0                          # (B, C, H, W)
+    return avg.argmax(dim=1)                                            # (B, H, W)
+
+
+# ─────────────────────────────────────────────
 # MAIN EVALUATION FUNCTION
 # ─────────────────────────────────────────────
 
@@ -192,7 +241,8 @@ def evaluate_model(
     model:       nn.Module,
     loader:      torch.utils.data.DataLoader,
     device:      torch.device,
-    num_classes: int = NUM_CLASSES,
+    num_classes: int  = NUM_CLASSES,
+    use_tta:     bool = False,
 ) -> dict:
     """
     Run the model on the full test set and compute all metrics.
@@ -202,6 +252,7 @@ def evaluate_model(
         loader      : test DataLoader (from get_dataloaders()[2])
         device      : MPS / CUDA / CPU
         num_classes : 10 for FloodNet
+        use_tta     : if True, average predictions over 3 flipped views (TTA)
 
     Returns:
         metrics dict (see _compute_metrics for full schema)
@@ -209,14 +260,19 @@ def evaluate_model(
     model.eval()
     cm = torch.zeros(num_classes, num_classes, dtype=torch.int64)
 
-    print("[Evaluate] Running inference on test set...")
+    tta_label = " (TTA: orig + H-flip + V-flip)" if use_tta else ""
+    print(f"[Evaluate] Running inference on test set{tta_label}...")
+
     with torch.no_grad():
         for batch_idx, (images, masks) in enumerate(loader):
             images = images.to(device)           # (B, 3, 512, 512)
             masks  = masks.to(device).long()     # (B, 512, 512)
 
-            logits = model(images)               # (B, 10, 512, 512)
-            preds  = logits.argmax(dim=1)        # (B, 512, 512) — class per pixel
+            if use_tta:
+                preds = _tta_predict(model, images)   # (B, 512, 512)
+            else:
+                logits = model(images)                # (B, 10, 512, 512)
+                preds  = logits.argmax(dim=1)         # (B, 512, 512)
 
             # Accumulate into CPU confusion matrix
             _update_cm(cm, preds.cpu(), masks.cpu(), num_classes)
@@ -411,11 +467,12 @@ def visualize_predictions(
 # ─────────────────────────────────────────────
 
 def run_evaluation(
-    checkpoint_path: str = None,
-    batch_size:      int = 4,
+    checkpoint_path: str  = None,
+    batch_size:      int  = 4,
     device:          torch.device = None,
     visualize:       bool = False,
     num_vis_samples: int  = 5,
+    use_tta:         bool = False,
 ) -> dict:
     """
     Load best_model.pth and evaluate on the FloodNet test set.
@@ -460,7 +517,7 @@ def run_evaluation(
     _, _, test_loader = get_dataloaders(batch_size=batch_size)
 
     # ── Evaluate ──────────────────────────────────────────────
-    metrics = evaluate_model(model, test_loader, device)
+    metrics = evaluate_model(model, test_loader, device, use_tta=use_tta)
 
     # ── Print and save ────────────────────────────────────────
     print_results(metrics)

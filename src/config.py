@@ -67,7 +67,8 @@ COLOR_TO_CLASS = {
 # ─────────────────────────────────────────────
 # TRAINING (exact from paper, Sec. IV)
 # ─────────────────────────────────────────────
-FULL_EPOCHS     = 20        # Final training epochs (paper: "All models trained with 20 epochs")
+FULL_EPOCHS     = 50        # Final training epochs (increased from paper's 20 for better convergence)
+WARMUP_EPOCHS   = 5         # Linear LR warmup before cosine decay (stabilizes early training)
 PROXY_EPOCHS    = 5         # Fast evaluation during HHO search (standard practice, not in paper)
 OPTIMIZER       = "Adam"    # All models use Adam (Table I)
 NUM_WORKERS     = 4         # DataLoader workers

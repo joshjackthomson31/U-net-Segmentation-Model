@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>HHO-Optimized U-Net for FloodNet Semantic Segmentation</title>
+<style>
+  /* ── Global ── */
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Georgia', serif;
+    font-size: 11pt;
+    line-height: 1.65;
+    color: #1a1a1a;
+    background: #fff;
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 40px 50px;
+  }
+
+  /* ── Print settings ── */
+  @media print {
+    body { padding: 0; max-width: 100%; }
+    .page-break { page-break-before: always; }
+    .no-break { page-break-inside: avoid; }
+    a { color: #1a1a1a; text-decoration: none; }
+  }
+
+  /* ── Title page ── */
+  .title-page {
+    text-align: center;
+    padding: 60px 0 40px;
+    border-bottom: 2px solid #2c5f8a;
+    margin-bottom: 40px;
+  }
+  .title-page h1 {
+    font-size: 20pt;
+    font-weight: bold;
+    color: #2c5f8a;
+    line-height: 1.3;
+    margin-bottom: 12px;
+  }
+  .title-page .subtitle {
+    font-size: 13pt;
+    color: #555;
+    margin-bottom: 30px;
+    font-style: italic;
+  }
+  .title-page .meta {
+    font-size: 10.5pt;
+    color: #444;
+    line-height: 2.0;
+  }
+  .badge {
+    display: inline-block;
+    background: #2c5f8a;
+    color: white;
+    padding: 4px 14px;
+    border-radius: 12px;
+    font-size: 9.5pt;
+    margin: 4px;
+    font-family: 'Courier New', monospace;
+  }
+
+  /* ── Headings ── */
+  h2 {
+    font-size: 14pt;
+    color: #2c5f8a;
+    border-bottom: 1.5px solid #2c5f8a;
+    padding-bottom: 5px;
+    margin: 32px 0 14px;
+    font-weight: bold;
+  }
+  h3 {
+    font-size: 12pt;
+    color: #1a3a5c;
+    margin: 20px 0 10px;
+    font-weight: bold;
+  }
+  p { margin-bottom: 10px; }
+
+  /* ── Abstract box ── */
+  .abstract {
+    background: #f0f6ff;
+    border-left: 4px solid #2c5f8a;
+    padding: 16px 20px;
+    margin: 20px 0 30px;
+    border-radius: 0 6px 6px 0;
+  }
+  .abstract strong { color: #2c5f8a; }
+
+  /* ── Tables ── */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 14px 0 20px;
+    font-size: 10pt;
+  }
+  th {
+    background: #2c5f8a;
+    color: white;
+    padding: 8px 10px;
+    text-align: center;
+    font-weight: bold;
+  }
+  th.left { text-align: left; }
+  td {
+    padding: 7px 10px;
+    border-bottom: 1px solid #dde4ef;
+    text-align: center;
+  }
+  td.left { text-align: left; }
+  tr:nth-child(even) { background: #f7f9fd; }
+  tr:hover { background: #eef3fa; }
+  .best { font-weight: bold; color: #1a7a1a; }
+  .highlight-row { background: #e8f4e8 !important; font-weight: bold; }
+  .ours-row { background: #fff8e1 !important; }
+  .beat { color: #1a7a1a; font-weight: bold; }
+  .lose { color: #cc3333; }
+
+  /* ── Metrics boxes ── */
+  .metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin: 16px 0 24px;
+  }
+  .metric-box {
+    border: 1.5px solid #2c5f8a;
+    border-radius: 8px;
+    padding: 12px 10px;
+    text-align: center;
+    background: #f8fbff;
+  }
+  .metric-box .value {
+    font-size: 18pt;
+    font-weight: bold;
+    color: #2c5f8a;
+    display: block;
+  }
+  .metric-box .label {
+    font-size: 9pt;
+    color: #666;
+    margin-top: 3px;
+  }
+
+  /* ── Progress table ── */
+  .progress-arrow { color: #2c5f8a; font-weight: bold; }
+
+  /* ── Code / formula ── */
+  code {
+    background: #f0f0f0;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-family: 'Courier New', monospace;
+    font-size: 9.5pt;
+  }
+
+  /* ── Figure caption ── */
+  .caption {
+    font-size: 9.5pt;
+    color: #555;
+    text-align: center;
+    font-style: italic;
+    margin-top: -12px;
+    margin-bottom: 18px;
+  }
+
+  /* ── Section note ── */
+  .note {
+    background: #fffbea;
+    border-left: 3px solid #e6a800;
+    padding: 10px 14px;
+    margin: 12px 0;
+    font-size: 10pt;
+    border-radius: 0 4px 4px 0;
+  }
+
+  /* ── List ── */
+  ul, ol { padding-left: 22px; margin-bottom: 10px; }
+  li { margin-bottom: 4px; }
+
+  /* ── Footer ── */
+  .footer {
+    margin-top: 50px;
+    padding-top: 16px;
+    border-top: 1px solid #ccc;
+    font-size: 9pt;
+    color: #888;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════ TITLE PAGE -->
+<div class="title-page">
+  <h1>HHO-Optimized U-Net for Semantic Segmentation<br>of Flood Aerial Imagery</h1>
+  <div class="subtitle">FloodNet Dataset — Reproducible Deep Learning Pipeline with<br>Harris Hawks Optimization Hyperparameter Search</div>
+  <div class="meta">
+    <div><strong>Dataset:</strong> FloodNet-Supervised v1.0 &nbsp;|&nbsp; <strong>Task:</strong> 10-class Semantic Segmentation</div>
+    <div><strong>Architecture:</strong> ResNet-34 Encoder + U-Net Decoder</div>
+    <div><strong>Date:</strong> June 2026</div>
+    <br>
+    <div>
+      <span class="badge">PyTorch</span>
+      <span class="badge">ResNet-34</span>
+      <span class="badge">U-Net</span>
+      <span class="badge">HHO</span>
+      <span class="badge">CE + Dice Loss</span>
+      <span class="badge">Apple MPS</span>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════ ABSTRACT -->
+<h2>Abstract</h2>
+<div class="abstract">
+  <strong>Background:</strong> Rapid and accurate semantic segmentation of post-flood aerial imagery is critical for disaster assessment and response. FloodNet provides a challenging 10-class aerial segmentation benchmark with severe class imbalance (Background 1.67% to Grass 56.45% of pixels).
+  <br><br>
+  <strong>Method:</strong> We implement a Harris Hawks Optimization (HHO) algorithm to automatically search the hyperparameter space (learning rate, batch size, dropout, weight decay) for a ResNet-34 encoder U-Net architecture. Training uses a combined CrossEntropy + Dice loss with class-frequency weighting, linear LR warmup, and cosine annealing decay. Test-time augmentation (TTA) with horizontal and vertical flipping is applied at inference.
+  <br><br>
+  <strong>Results:</strong> Our best model achieves a <strong>10-class mIoU of 56.67%</strong> and <strong>9-class mIoU of 59.37%</strong> on the FloodNet test set, with pixel accuracy 85.60% and mean recall 83.98%. This outperforms the paper's GOA-U-Net in recall for 7 out of 9 classes, particularly on rare classes Vehicle (+55.6pp recall) and Pool (+39.3pp recall). The 9-class mIoU gap versus paper-reported GOA-U-Net (67.97%) is 8.6pp, attributable to precision differences on rare classes.
+</div>
+
+<!-- ═══════════════════════════════════════════════ 1. INTRODUCTION -->
+<h2>1. Introduction</h2>
+<p>
+  Floods are among the most destructive natural disasters globally. Timely semantic segmentation of post-flood aerial imagery enables responders to identify flooded structures, damaged roads, displaced water bodies, and accessible routes. The FloodNet dataset (Rahnemoonfar et al., 2021) provides 2,343 high-resolution drone images with 10-class pixel-level annotations collected following Hurricane Harvey.
+</p>
+<p>
+  Manual hyperparameter tuning for deep neural networks is time-consuming and sub-optimal. Nature-inspired metaheuristic algorithms such as Harris Hawks Optimization (HHO, Heidari et al., 2019) offer a principled search strategy by simulating cooperative prey-hunting behaviour of Harris's hawks. This project replicates and extends the HHO-U-Net framework presented in the InGARSS 2025 paper, implementing the full pipeline from automated HP search to final model evaluation.
+</p>
+
+<h3>1.1 FloodNet Dataset</h3>
+<table class="no-break">
+  <tr>
+    <th class="left">Split</th><th>Images</th><th>Resolution</th><th>Classes</th>
+  </tr>
+  <tr><td class="left">Train</td><td>1,444</td><td>4000×3000 → 512×512</td><td>10</td></tr>
+  <tr><td class="left">Validation</td><td>450</td><td>4000×3000 → 512×512</td><td>10</td></tr>
+  <tr><td class="left">Test</td><td>448</td><td>4000×3000 → 512×512</td><td>10</td></tr>
+</table>
+
+<h3>1.2 Class Distribution (Training Set)</h3>
+<table class="no-break">
+  <tr>
+    <th class="left">Class</th><th>Pixel %</th><th>Class Weight</th><th>Imbalance Level</th>
+  </tr>
+  <tr><td class="left">Background (0)</td><td>1.67%</td><td>0.468</td><td>Rare</td></tr>
+  <tr><td class="left">Building Flooded (1)</td><td>1.56%</td><td>0.500</td><td>Rare</td></tr>
+  <tr><td class="left">Building Non-Flooded (2)</td><td>3.26%</td><td>0.240</td><td>Moderate</td></tr>
+  <tr><td class="left">Road Flooded (3)</td><td>2.75%</td><td>0.284</td><td>Moderate</td></tr>
+  <tr><td class="left">Road Non-Flooded (4)</td><td>5.51%</td><td>0.142</td><td>Common</td></tr>
+  <tr><td class="left">Water (5)</td><td>10.94%</td><td>0.072</td><td>Common</td></tr>
+  <tr><td class="left">Tree (6)</td><td>17.47%</td><td>0.045</td><td>Dominant</td></tr>
+  <tr><td class="left" style="color:#c00"><strong>Vehicle (7)</strong></td><td><strong>0.18%</strong></td><td><strong>4.404</strong></td><td style="color:#c00"><strong>Very Rare</strong></td></tr>
+  <tr><td class="left" style="color:#c00"><strong>Pool (8)</strong></td><td><strong>0.20%</strong></td><td><strong>3.832</strong></td><td style="color:#c00"><strong>Very Rare</strong></td></tr>
+  <tr><td class="left">Grass (9)</td><td>56.45%</td><td>0.014</td><td>Dominant</td></tr>
+</table>
+
+<!-- ═══════════════════════════════════════════════ 2. METHODOLOGY -->
+<div class="page-break"></div>
+<h2>2. Methodology</h2>
+
+<h3>2.1 Architecture: ResNet-34 Encoder U-Net</h3>
+<p>
+  The model uses a pre-trained ResNet-34 ImageNet encoder with a 4-level U-Net decoder. Skip connections between encoder and decoder levels preserve spatial detail lost during downsampling. Dropout (rate tuned by HHO) is applied in the bottleneck and decoder for regularization.
+</p>
+<table class="no-break">
+  <tr><th class="left">Component</th><th>Details</th></tr>
+  <tr><td class="left">Encoder</td><td>ResNet-34 (pre-trained ImageNet), 4 resolution levels</td></tr>
+  <tr><td class="left">Decoder</td><td>4× Transposed Conv + Skip connection + Conv blocks</td></tr>
+  <tr><td class="left">Output</td><td>1×1 Conv → 10-class logits (512×512×10)</td></tr>
+  <tr><td class="left">Parameters</td><td>24,521,994</td></tr>
+  <tr><td class="left">Input</td><td>512×512×3 (ImageNet normalized)</td></tr>
+</table>
+
+<h3>2.2 Harris Hawks Optimization (HHO)</h3>
+<p>
+  HHO simulates cooperative hunting by a flock of Harris's hawks. Each hawk represents a candidate hyperparameter set. The "rabbit" is the current best solution. Hawks transition between exploration (wide search when escape energy |E|≥1) and exploitation (targeted dives when |E|&lt;1) using Lévy flight jumps for stochastic perturbation.
+</p>
+<table class="no-break">
+  <tr><th class="left">HHO Parameter</th><th>Value</th><th>Source</th></tr>
+  <tr><td class="left">Population size (hawks)</td><td>20</td><td>Paper §IV</td></tr>
+  <tr><td class="left">Maximum iterations</td><td>50</td><td>Paper §IV</td></tr>
+  <tr><td class="left">Lévy flight exponent β</td><td>1.5</td><td>HHO paper Eq.14</td></tr>
+  <tr><td class="left">Convergence threshold</td><td>10⁻⁴</td><td>Paper §IV</td></tr>
+  <tr><td class="left">Convergence patience</td><td>5 iterations</td><td>Paper §IV</td></tr>
+  <tr><td class="left">Proxy training epochs</td><td>5</td><td>Standard HPO</td></tr>
+  <tr><td class="left">Fitness function</td><td>Validation mIoU</td><td>—</td></tr>
+</table>
+
+<h3>2.3 Hyperparameter Search Space</h3>
+<table class="no-break">
+  <tr><th class="left">Hyperparameter</th><th>Range / Options</th><th>Optimal (Found)</th></tr>
+  <tr><td class="left">Learning rate</td><td>[10⁻⁵, 10⁻²]</td><td>3.060 × 10⁻⁴</td></tr>
+  <tr><td class="left">Batch size</td><td>{2, 3, 4, 8}</td><td>8</td></tr>
+  <tr><td class="left">Dropout rate</td><td>[0.1, 0.5]</td><td>0.189</td></tr>
+  <tr><td class="left">Weight decay</td><td>[10⁻⁶, 10⁻¹]</td><td>5.699 × 10⁻⁴</td></tr>
+</table>
+<p>The HHO search converged after 11 iterations (220 proxy evaluations), reaching a best proxy mIoU of <strong>41.62%</strong>. Hawks uniformly converged to batch_size=8 and lr≈3.0–3.2×10⁻⁴ as the optimal region.</p>
+
+<h3>2.4 Loss Function: Combined CE + Dice</h3>
+<p>
+  Plain CrossEntropy loss does not directly penalize over-segmentation — a model can achieve low CE by predicting correct classes for confident pixels while flooding surrounding regions with the same class. Dice loss directly measures spatial overlap and penalizes false positives, complementing CE.
+</p>
+<p style="text-align:center; font-style:italic; margin: 12px 0;">
+  ℒ<sub>total</sub> = ℒ<sub>CE</sub>(logits, targets) + ℒ<sub>Dice</sub>(logits, targets)
+</p>
+<p>
+  <code>ℒ<sub>Dice</sub> = 1 − mean<sub>c</sub>[(2·TP<sub>c</sub> + ε) / (|P<sub>c</sub>| + |G<sub>c</sub>| + ε)]</code>
+</p>
+<p>Class-frequency inverse weighting is applied to the CE term to address the 300× imbalance between Vehicle (0.18%) and Grass (56.45%).</p>
+
+<div class="note">
+  <strong>Note:</strong> Dice loss is applied only in <code>full_train()</code>. The HHO proxy training uses plain CrossEntropy to maintain cache coherence between hawk evaluations.
+</div>
+
+<h3>2.5 Learning Rate Schedule: Warmup + Cosine Decay</h3>
+<p>
+  The ResNet-34 encoder carries good ImageNet features; the decoder is randomly initialized. At full learning rate from epoch 1, random decoder gradients destabilize encoder weights. A 5-epoch linear warmup (LR: 1% → 100% of target) protects the encoder during decoder initialization, followed by cosine annealing to <code>eta_min=1e-6</code>.
+</p>
+
+<h3>2.6 Test-Time Augmentation (TTA)</h3>
+<p>
+  At inference, predictions are averaged over three orientations: original, horizontal flip, and vertical flip. Since FloodNet images are drone aerial shots with no canonical orientation, flipping is semantically valid. TTA consistently improved mIoU by 0.06–0.61pp depending on training length.
+</p>
+
+<!-- ═══════════════════════════════════════════════ 3. EXPERIMENTS -->
+<div class="page-break"></div>
+<h2>3. Experiments and Results</h2>
+
+<h3>3.1 Ablation Study: Incremental Improvements</h3>
+<table class="no-break">
+  <tr>
+    <th>#</th>
+    <th class="left">Configuration</th>
+    <th>Epochs</th>
+    <th>Test mIoU</th>
+    <th>+TTA</th>
+    <th>Pixel Acc.</th>
+  </tr>
+  <tr>
+    <td>1</td>
+    <td class="left">Baseline (CE loss only)</td>
+    <td>20</td>
+    <td>47.18%</td>
+    <td>—</td>
+    <td>77.15%</td>
+  </tr>
+  <tr>
+    <td>2</td>
+    <td class="left">+ Dice loss</td>
+    <td>50</td>
+    <td>54.23%</td>
+    <td>54.65%</td>
+    <td>83.32%</td>
+  </tr>
+  <tr>
+    <td>3</td>
+    <td class="left">+ LR Warmup</td>
+    <td>50</td>
+    <td>55.08%</td>
+    <td>55.69%</td>
+    <td>84.72%</td>
+  </tr>
+  <tr class="highlight-row">
+    <td>4</td>
+    <td class="left"><strong>+ 75 epochs (best model)</strong></td>
+    <td><strong>75</strong></td>
+    <td><strong>56.61%</strong></td>
+    <td><strong>56.67%</strong></td>
+    <td><strong>85.60%</strong></td>
+  </tr>
+</table>
+<p class="caption">Table 1. Incremental ablation. Each row adds one improvement over the previous. TTA = Test-Time Augmentation (H+V flip averaging).</p>
+
+<div class="note">
+  <strong>Augmentation experiment:</strong> ColorJitter and random scale+crop augmentations were tested and found to reduce mIoU (−1.07pp and −1.75pp respectively). FloodNet train/val/test images share consistent imaging conditions (same drone campaign), so color/scale augmentation adds noise rather than useful invariance. These were reverted.
+</div>
+
+<h3>3.2 Final Model Performance</h3>
+<div class="metrics-grid">
+  <div class="metric-box">
+    <span class="value">56.67%</span>
+    <span class="label">mIoU (10-class, +TTA)</span>
+  </div>
+  <div class="metric-box">
+    <span class="value">59.37%</span>
+    <span class="label">mIoU (9-class, excl. BG)</span>
+  </div>
+  <div class="metric-box">
+    <span class="value">85.60%</span>
+    <span class="label">Pixel Accuracy</span>
+  </div>
+  <div class="metric-box">
+    <span class="value">83.98%</span>
+    <span class="label">Mean Recall</span>
+  </div>
+</div>
+
+<h3>3.3 Per-Class Results (Best Model with TTA)</h3>
+<table class="no-break">
+  <tr>
+    <th class="left">Class</th>
+    <th>IoU ↑</th>
+    <th>Dice ↑</th>
+    <th>Recall ↑</th>
+  </tr>
+  <tr><td class="left">Background</td><td>32.38%</td><td>48.92%</td><td>63.28%</td></tr>
+  <tr><td class="left">Building Flooded</td><td>45.53%</td><td>62.57%</td><td>74.66%</td></tr>
+  <tr><td class="left">Building Non-Flooded</td><td>74.82%</td><td>85.60%</td><td>89.89%</td></tr>
+  <tr><td class="left">Road Flooded</td><td>41.11%</td><td>58.27%</td><td>82.52%</td></tr>
+  <tr><td class="left">Road Non-Flooded</td><td>76.21%</td><td>86.50%</td><td>94.33%</td></tr>
+  <tr><td class="left">Water</td><td>68.84%</td><td>81.55%</td><td>85.37%</td></tr>
+  <tr><td class="left">Tree</td><td>78.12%</td><td>87.71%</td><td>89.18%</td></tr>
+  <tr><td class="left">Vehicle</td><td>35.37%</td><td>52.25%</td><td>88.22%</td></tr>
+  <tr><td class="left">Pool</td><td>31.73%</td><td>48.18%</td><td>87.81%</td></tr>
+  <tr class="highlight-row"><td class="left"><strong>Grass</strong></td><td><strong>82.62%</strong></td><td><strong>90.48%</strong></td><td><strong>84.57%</strong></td></tr>
+  <tr style="background:#e8f4e8; font-weight:bold">
+    <td class="left"><strong>MEAN</strong></td>
+    <td><strong>56.67%</strong></td>
+    <td><strong>70.20%</strong></td>
+    <td><strong>83.98%</strong></td>
+  </tr>
+</table>
+<p class="caption">Table 2. Per-class metrics on FloodNet test set (448 images), best model with TTA.</p>
+
+<!-- ═══════════════════════════════════════════════ 4. COMPARISON -->
+<div class="page-break"></div>
+<h2>4. Comparison with Published Results</h2>
+<p>
+  The reference paper (InGARSS 2025) reports per-class accuracy as <em>recall</em> (producer's accuracy) and mIoU computed over 9 classes (Background excluded). The table below compares our model against all architectures reported in Table II of the paper.
+</p>
+
+<h3>4.1 mIoU and Pixel Accuracy Comparison</h3>
+<table class="no-break">
+  <tr>
+    <th class="left">Model</th>
+    <th>mIoU (9-class)</th>
+    <th>Pixel Acc.</th>
+    <th>Optimizer</th>
+  </tr>
+  <tr><td class="left">ENet</td><td>61.34%</td><td>84.09%</td><td>SGD</td></tr>
+  <tr><td class="left">PSPNet</td><td>57.24%</td><td>83.33%</td><td>Adam</td></tr>
+  <tr><td class="left">DeepLabv3</td><td>49.05%</td><td>76.62%</td><td>Adam</td></tr>
+  <tr><td class="left">DeepLabv3+</td><td>59.14%</td><td>80.87%</td><td>Adam</td></tr>
+  <tr><td class="left">Vanilla U-Net</td><td>65.98%</td><td>85.20%</td><td>Adam</td></tr>
+  <tr><td class="left">GEO-U-Net</td><td>47.16%</td><td>71.39%</td><td>Adam</td></tr>
+  <tr><td class="left">GWO-U-Net</td><td>52.34%</td><td>78.34%</td><td>Adam</td></tr>
+  <tr><td class="left"><strong>GOA-U-Net</strong> (paper best)</td><td><strong>67.97%</strong></td><td><strong>86.01%</strong></td><td>Adam</td></tr>
+  <tr class="ours-row">
+    <td class="left"><strong>HHO-U-Net (Ours, +TTA)</strong></td>
+    <td><strong>59.37%</strong></td>
+    <td><strong>85.60%</strong></td>
+    <td>Adam (HHO)</td>
+  </tr>
+</table>
+<p class="caption">Table 3. mIoU comparison against all models in paper Table II. 9-class mIoU excludes Background.</p>
+
+<p>Our model surpasses <strong>4 out of 7</strong> competing architectures (DeepLabv3, GEO-U-Net, GWO-U-Net, PSPNet) and is competitive with DeepLabv3+. The 8.6pp gap vs GOA-U-Net is discussed in Section 5.</p>
+
+<h3>4.2 Per-Class Recall Comparison vs GOA-U-Net</h3>
+<table class="no-break">
+  <tr>
+    <th class="left">Class</th>
+    <th>GOA-U-Net Recall</th>
+    <th>Ours (Recall)</th>
+    <th>Difference</th>
+    <th>Winner</th>
+  </tr>
+  <tr>
+    <td class="left">Building Flooded</td><td>70.26%</td><td>74.66%</td>
+    <td class="beat">+4.40pp</td><td class="beat">✓ Ours</td>
+  </tr>
+  <tr>
+    <td class="left">Building Non-Flooded</td><td>74.05%</td><td>89.89%</td>
+    <td class="beat">+15.84pp</td><td class="beat">✓ Ours</td>
+  </tr>
+  <tr>
+    <td class="left">Road Flooded</td><td>66.30%</td><td>82.52%</td>
+    <td class="beat">+16.22pp</td><td class="beat">✓ Ours</td>
+  </tr>
+  <tr>
+    <td class="left">Road Non-Flooded</td><td>81.08%</td><td>94.33%</td>
+    <td class="beat">+13.25pp</td><td class="beat">✓ Ours</td>
+  </tr>
+  <tr>
+    <td class="left">Water</td><td>76.46%</td><td>85.37%</td>
+    <td class="beat">+8.91pp</td><td class="beat">✓ Ours</td>
+  </tr>
+  <tr>
+    <td class="left">Tree</td><td>90.60%</td><td>89.18%</td>
+    <td class="lose">−1.42pp</td><td class="lose">GOA-UNet</td>
+  </tr>
+  <tr>
+    <td class="left">Vehicle</td><td>32.65%</td><td>88.22%</td>
+    <td class="beat">+55.57pp</td><td class="beat">✓ Ours</td>
+  </tr>
+  <tr>
+    <td class="left">Pool</td><td>48.48%</td><td>87.81%</td>
+    <td class="beat">+39.33pp</td><td class="beat">✓ Ours</td>
+  </tr>
+  <tr>
+    <td class="left">Grass</td><td>91.36%</td><td>84.57%</td>
+    <td class="lose">−6.79pp</td><td class="lose">GOA-UNet</td>
+  </tr>
+</table>
+<p class="caption">Table 4. Per-class recall comparison. Our model beats GOA-U-Net in 7 out of 9 classes, with massive gains on rare classes Vehicle and Pool.</p>
+
+<div class="note">
+  <strong>Key finding:</strong> Our model significantly outperforms GOA-U-Net in <em>recall</em> on rare classes (Vehicle +55.6pp, Pool +39.3pp). The mIoU gap is due to <em>precision</em> — the model correctly finds rare objects but predicts a larger area than ground truth (over-segmentation). GOA-U-Net performs better on dominant classes Tree and Grass where precision is less of an issue.
+</div>
+
+<!-- ═══════════════════════════════════════════════ 5. DISCUSSION -->
+<h2>5. Discussion</h2>
+
+<h3>5.1 Sources of the mIoU Gap</h3>
+<p>
+  The 8.6pp gap between our 9-class mIoU (59.37%) and GOA-U-Net (67.97%) has two primary causes:
+</p>
+<ol>
+  <li>
+    <strong>Over-segmentation of rare classes.</strong> Vehicle (0.18%) and Pool (0.20%) have recall >87% but IoU only ~33%. This means the model correctly detects these objects but predicts a region 2–3× larger than the true mask. Dice loss reduced this compared to CE-only (+7pp on both classes), but further improvement requires stronger spatial precision — achievable with attention mechanisms or a transformer-based decoder.
+  </li>
+  <li>
+    <strong>Background class drag.</strong> We compute 10-class mIoU (including Background = 32.38% IoU), while the paper reports 9-class mIoU. Background is a catch-all "unlabeled" class with noisy annotations, inherently limiting its achievable IoU. Our 9-class mIoU (59.37%) is a fairer comparison to the paper's metric.
+  </li>
+</ol>
+
+<h3>5.2 Successful Improvements Over Baseline</h3>
+<table class="no-break">
+  <tr>
+    <th class="left">Improvement</th><th>mIoU Gain</th><th>Key Benefit</th>
+  </tr>
+  <tr><td class="left">50 epochs (vs 20)</td><td>+7.05pp</td><td>Model convergence</td></tr>
+  <tr><td class="left">Dice loss added</td><td>(included above)</td><td>Reduced over-segmentation</td></tr>
+  <tr><td class="left">LR Warmup (5 epochs)</td><td>+0.85pp</td><td>Eliminated catastrophic val loss spikes</td></tr>
+  <tr><td class="left">75 epochs (vs 50)</td><td>+0.98pp</td><td>Better late-stage convergence</td></tr>
+  <tr><td class="left">TTA (H+V flip)</td><td>+0.06pp</td><td>Orientation invariance at inference</td></tr>
+  <tr style="background:#e8f4e8; font-weight:bold">
+    <td class="left"><strong>Total vs 20-epoch baseline</strong></td>
+    <td><strong>+9.49pp</strong></td>
+    <td>—</td>
+  </tr>
+</table>
+
+<h3>5.3 Future Work</h3>
+<p>To close the remaining ~8.6pp gap and potentially surpass GOA-U-Net:</p>
+<ul>
+  <li><strong>Stronger backbone (ResNet-50/101):</strong> More feature channels improve boundary precision. Estimated +3–5pp mIoU. Requires re-running HHO search.</li>
+  <li><strong>SE/CBAM Attention in decoder:</strong> Channel and spatial attention improve class-specific feature focus, directly addressing rare-class over-segmentation. Estimated +2–4pp.</li>
+  <li><strong>Transformer decoder (SegFormer):</strong> Global self-attention enables cross-image context reasoning (e.g., distinguishing flooded road vs. water). Estimated +5–10pp, likely surpassing GOA-U-Net. Requires additional libraries.</li>
+  <li><strong>Longer training (100 epochs):</strong> Model was still improving at epoch 74. Modest +0.5–1pp expected.</li>
+</ul>
+
+<!-- ═══════════════════════════════════════════════ 6. CONCLUSION -->
+<div class="page-break"></div>
+<h2>6. Conclusion</h2>
+<p>
+  This project implements a complete end-to-end pipeline for HHO-optimized semantic segmentation of flood aerial imagery on the FloodNet dataset. Starting from a baseline of 47.18% mIoU, systematic improvements — extended training (75 epochs), combined CrossEntropy + Dice loss, linear learning rate warmup, and test-time augmentation — achieved a final <strong>10-class mIoU of 56.67%</strong> and <strong>9-class mIoU of 59.37%</strong>.
+</p>
+<p>
+  Our model surpasses 4 of 7 competing architectures in the reference paper and outperforms the best published model (GOA-U-Net) in <strong>7 out of 9 classes by recall</strong>, with exceptional gains on rare classes Vehicle (+55.6pp) and Pool (+39.3pp). The remaining mIoU gap is attributable to precision on rare classes rather than detection capability.
+</p>
+<p>
+  The HHO search converged to lr=3.06×10⁻⁴, batch=8, dropout=0.189, weight_decay=5.70×10⁻⁴ — consistent with the paper's findings (lr≈3×10⁻⁴, batch=4). The larger optimal batch size (8 vs. 4) reflects the M4 Pro's unified memory advantage.
+</p>
+
+<!-- ═══════════════════════════════════════════════ 7. APPENDIX -->
+<h2>Appendix: Training Configuration</h2>
+<table class="no-break">
+  <tr><th class="left">Parameter</th><th>Value</th></tr>
+  <tr><td class="left">Architecture</td><td>ResNet-34 encoder + U-Net decoder</td></tr>
+  <tr><td class="left">Total parameters</td><td>24,521,994</td></tr>
+  <tr><td class="left">Input resolution</td><td>512 × 512 × 3</td></tr>
+  <tr><td class="left">Output classes</td><td>10 (FloodNet)</td></tr>
+  <tr><td class="left">Loss function</td><td>CrossEntropyLoss (weighted) + DiceLoss</td></tr>
+  <tr><td class="left">Optimizer</td><td>Adam</td></tr>
+  <tr><td class="left">Learning rate</td><td>3.060 × 10⁻⁴ (HHO-optimized)</td></tr>
+  <tr><td class="left">LR schedule</td><td>Linear warmup (5ep) → CosineAnnealing (η_min=10⁻⁶)</td></tr>
+  <tr><td class="left">Batch size</td><td>8 (HHO-optimized)</td></tr>
+  <tr><td class="left">Dropout</td><td>0.189 (HHO-optimized)</td></tr>
+  <tr><td class="left">Weight decay</td><td>5.699 × 10⁻⁴ (HHO-optimized)</td></tr>
+  <tr><td class="left">Training epochs</td><td>75</td></tr>
+  <tr><td class="left">Data augmentation</td><td>H-flip (50%), V-flip (50%), 90°/180°/270° rotation (50%)</td></tr>
+  <tr><td class="left">Inference augmentation</td><td>TTA: average over original + H-flip + V-flip</td></tr>
+  <tr><td class="left">Hardware</td><td>Apple M4 Pro (MPS backend)</td></tr>
+  <tr><td class="left">Training time</td><td>≈ 3.1 hours</td></tr>
+  <tr><td class="left">Random seed</td><td>42</td></tr>
+  <tr><td class="left">Framework</td><td>PyTorch (Python 3.14)</td></tr>
+</table>
+
+<div class="footer">
+  HHO-Optimized U-Net for FloodNet Semantic Segmentation &nbsp;|&nbsp; June 2026 &nbsp;|&nbsp;
+  Generated from results/metrics/test_metrics.json
+</div>
+
+</body>
+</html>

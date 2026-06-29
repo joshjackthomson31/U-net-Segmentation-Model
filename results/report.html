@@ -20,9 +20,15 @@
   /* ── Print settings ── */
   @media print {
     body { padding: 0; max-width: 100%; }
-    .page-break { page-break-before: always; }
-    .no-break { page-break-inside: avoid; }
     a { color: #1a1a1a; text-decoration: none; }
+    /* Keep tables intact — both legacy and modern syntax for Chrome */
+    table { break-inside: avoid; page-break-inside: avoid; }
+    thead { display: table-header-group; }
+    tr    { break-inside: avoid; page-break-inside: avoid; }
+    .no-break { break-inside: avoid; page-break-inside: avoid; }
+    /* Keep headings attached to the content that follows them */
+    h2, h3 { break-after: avoid; page-break-after: avoid; }
+    h2 + *, h3 + * { break-before: avoid; page-break-before: avoid; }
   }
 
   /* ── Title page ── */
@@ -155,6 +161,12 @@
     font-size: 9.5pt;
   }
 
+  /* ── Keep tables together (screen + print) ── */
+  table { break-inside: avoid; page-break-inside: avoid; }
+  thead { display: table-header-group; }
+  tr    { break-inside: avoid; page-break-inside: avoid; }
+  .no-break { break-inside: avoid; page-break-inside: avoid; }
+
   /* ── Figure caption ── */
   .caption {
     font-size: 9.5pt;
@@ -259,7 +271,6 @@
 </table>
 
 <!-- ═══════════════════════════════════════════════ 2. METHODOLOGY -->
-<div class="page-break"></div>
 <h2>2. Methodology</h2>
 
 <h3>2.1 Architecture: ResNet-34 Encoder U-Net</h3>
@@ -298,7 +309,7 @@
   <tr><td class="left">Dropout rate</td><td>[0.1, 0.5]</td><td>0.189</td></tr>
   <tr><td class="left">Weight decay</td><td>[10⁻⁶, 10⁻¹]</td><td>5.699 × 10⁻⁴</td></tr>
 </table>
-<p>The HHO search converged after 11 iterations (220 proxy evaluations), reaching a best proxy mIoU of <strong>41.62%</strong>. Hawks uniformly converged to batch_size=8 and lr≈3.0–3.2×10⁻⁴ as the optimal region.</p>
+<p>The HHO search converged after 11 iterations (135+ unique proxy evaluations; up to 220 theoretical with 20 hawks, reduced by evaluation caching), reaching a best proxy mIoU of <strong>41.62%</strong>. Hawks uniformly converged to batch_size=8 and lr≈3.0–3.2×10⁻⁴ as the optimal region.</p>
 
 <h3>2.4 Loss Function: Combined CE + Dice</h3>
 <p>
@@ -327,7 +338,6 @@
 </p>
 
 <!-- ═══════════════════════════════════════════════ 3. EXPERIMENTS -->
-<div class="page-break"></div>
 <h2>3. Experiments and Results</h2>
 
 <h3>3.1 Ablation Study: Incremental Improvements</h3>
@@ -427,7 +437,6 @@
 <p class="caption">Table 2. Per-class metrics on FloodNet test set (448 images), best model with TTA.</p>
 
 <!-- ═══════════════════════════════════════════════ 4. COMPARISON -->
-<div class="page-break"></div>
 <h2>4. Comparison with Published Results</h2>
 <p>
   The reference paper (InGARSS 2025) reports per-class accuracy as <em>recall</em> (producer's accuracy) and mIoU computed over 9 classes (Background excluded). The table below compares our model against all architectures reported in Table II of the paper.
@@ -555,7 +564,6 @@
 </ul>
 
 <!-- ═══════════════════════════════════════════════ 6. CONCLUSION -->
-<div class="page-break"></div>
 <h2>6. Conclusion</h2>
 <p>
   This project implements a complete end-to-end pipeline for HHO-optimized semantic segmentation of flood aerial imagery on the FloodNet dataset. Starting from a baseline of 47.18% mIoU, systematic improvements — extended training (75 epochs), combined CrossEntropy + Dice loss, linear learning rate warmup, and test-time augmentation — achieved a final <strong>10-class mIoU of 56.67%</strong> and <strong>9-class mIoU of 59.37%</strong>.
